@@ -136,8 +136,10 @@ if submitted and uploaded_file is not None:
                 st.write(content)
 
         finally:
-            # Ensure the vectorstore is cleaned up properly
-            vectorstore._client._system.stop()
-            #SharedSystemClient.pop(vectorstore._client._identifier, None)
-            vectorstore = None
+            # # Ensure the vectorstore is cleaned up properly
+            # vectorstore._client._system.stop()
+            # #SharedSystemClient.pop(vectorstore._client._identifier, None)
+            # vectorstore = None
+
+            shutil.rmtree(temp_vectorstore_dir)  # Clean up the temporary directory
             
