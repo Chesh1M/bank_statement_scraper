@@ -39,6 +39,8 @@ prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
 st.set_page_config(page_title='🦜🔗 Bank Statement Tracker App')
 st.title('🦜🔗 Bank Statement Tracker App')
 
+import sqlite3
+st.write("SQLite version:", sqlite3.sqlite_version)
 
 # Initialize session state for template selection and query text
 if "selected_template" not in st.session_state:
@@ -131,9 +133,8 @@ if submitted and uploaded_file is not None:
             response = llm.invoke(prompt)
             content = response.content
 
-            import sqlite3
-            st.write("SQLite version:", sqlite3.sqlite_version)
-            
+
+
             # Show result
             if content:
                 st.write(content)
