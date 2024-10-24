@@ -131,6 +131,9 @@ if submitted and uploaded_file is not None:
             response = llm.invoke(prompt)
             content = response.content
 
+            import sqlite3
+            st.write("SQLite version:", sqlite3.sqlite_version)
+            
             # Show result
             if content:
                 st.write(content)
