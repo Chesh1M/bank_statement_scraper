@@ -9,6 +9,7 @@ import tempfile
 import streamlit as st
 from functions import *
 
+# Import latest sqlite for streamlit compatibility with chromadb
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
@@ -29,7 +30,6 @@ Use the following pieces of retrieved context to answer the question.
 
 Answer the question based on the above context: {question}
 """
-#Can you organize all the transactions in this bank statement from {question}, in a table format. Can you also sum up the total amount and show your working.
 
 # Create prompt
 prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
@@ -40,11 +40,8 @@ prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
 
 ##### ========== Streamlit app setup ========== #####
 
-st.set_page_config(page_title='🦜🔗 Bank Statement Tracker App')
-st.title('🦜🔗 Bank Statement Tracker App')
-
-import sqlite3
-st.write("SQLite version:", sqlite3.sqlite_version)
+st.set_page_config(page_title='🦜🔗 Bank Statement QnA App')
+st.title('🦜🔗 Bank Statement QnA App')
 
 # Initialize session state for template selection and query text
 if "selected_template" not in st.session_state:
@@ -137,17 +134,10 @@ if submitted and uploaded_file is not None:
             response = llm.invoke(prompt)
             content = response.content
 
-
-
             # Show result
             if content:
                 st.write(content)
 
         finally:
-            # # Ensure the vectorstore is cleaned up properly
-            # vectorstore._client._system.stop()
-            # #SharedSystemClient.pop(vectorstore._client._identifier, None)
-            # vectorstore = None
-
             shutil.rmtree(temp_vectorstore_dir)  # Clean up the temporary directory
             
