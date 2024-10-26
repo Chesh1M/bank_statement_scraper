@@ -9,6 +9,10 @@ import tempfile
 import streamlit as st
 from functions import *
 
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 # Create prompt template
 PROMPT_TEMPLATE = """
 You are an assistant for question-answering tasks.
