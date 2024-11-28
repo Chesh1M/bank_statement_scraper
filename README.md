@@ -1,4 +1,4 @@
-### RAG based application to query PDF documents, customized for bank statements.  
+### RAG based application to extract specified transactions from bank statements.  
 Models used 
 1. GPT-4o mini
 2. OpenAI o1-mini
