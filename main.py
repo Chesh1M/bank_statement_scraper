@@ -8,19 +8,28 @@ from langchain_core.prompts import ChatPromptTemplate
 import tempfile
 import streamlit as st
 from functions import *
+import pandas as pd
+import json
 
 # Import latest sqlite for streamlit compatibility with chromadb
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # Create prompt template
 PROMPT_TEMPLATE = """
 You are an assistant for question-answering tasks.
-You will be provided some documents, specifically bank statements.
-You are expected to summarize and organize the transactions information based on the question that will be asked. Your primary goal will be to provide insights into the transactions in the bank statement. As such, it is absolutely crucial that you do not miss out any rows of transactions in the bank statement, and be absolutely accurate. This means that you should not create additional transactions that do not exist.
-When asked to display or organize transactions in a table format, always organize it in ascending order by the date. There can be more than 1 of the same transaction on the same day, do not miss them from the output.
+You will be provided documents, specifically bank statements.
+You are expected to summarize and organize the transactions information based on the question that will be asked. Your primary goal will be to provide insights into the transactions in the bank statement. As such, it is absolutely crucial that you do not miss out any rows of transactions in the bank statement, and be extremely accurate. This means that you should not create additional transactions that do not exist.
+When asked to display or organize transactions, always organize it in ascending order by their date. 
+
+THIS IS IMPORTANT, PLEASE ENFORCE THIS RULE!!! There are NO ERRORS OR DUPLICATES in the document, even if 2 transactions have the same description, date, and amount, they should BOTH be extracted. Extract ALL transactions related to the ones mentioned in the prompt from the bank statement, even if multiple transactions occurred on the same date. Make sure to return all of them even if some are identical or happen on the same day.
+
 The transactions may also be split up into multiple pages or chunks, be sure to include all of them if relevant.
+
+Please provide the output in a json format because I want to be able to parse the output as a json object in Python using "json.loads".
+
+
 Use the following pieces of retrieved context to answer the question.
 
 
@@ -52,8 +61,7 @@ if "query_text" not in st.session_state:
 # Define available template questions
 template_options = [
     "----- Default: Leave blank -----",  # Blank option
-    "Can you organize all the transactions in this bank statement from <insert transaction name here>, in a table format.",
-    "Can you extract and compile a list of all the transactions in this bank statement in a table format. The transactions that I want you to extract should contain either the EXACT word '<insert word1 here>' or '<insert word2 here>'. For example, this means that if I want '<insert word1 here>', only transactions that contain this word should be extracted, DO NOT ALTER THE NAMES OF THE TRANSACTIONS. Please also indicate the full transaction description, as well as the type of each transaction whether it is incoming or outgoing."
+    "Can you extract and compile a list of all the transactions in this bank statement relating to <INSERT TRANSACTION NAME HERE>.",
 ]
 
 # Update session state when the user selects a template question
@@ -95,6 +103,7 @@ with st.form('myform'):
 if submitted and uploaded_file is not None:
     with st.spinner('Processing...'):
         llm = ChatOpenAI(model="gpt-4o-mini", api_key=OPENAI_API_KEY)
+        # llm = ChatOpenAI(model="o1-mini", api_key=OPENAI_API_KEY)
 
         # Save the uploaded file to a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
@@ -136,8 +145,37 @@ if submitted and uploaded_file is not None:
 
             # Show result
             if content:
-                st.write(content)
+                # Clean output to convert to JSON
+                clean_content = content.replace("\n", "").replace("\\", "").strip()
+                clean_content = content.strip("```json").strip("```").strip()
 
+                # Convert output to JSON
+                transactions = json.loads(clean_content)
+                
+                # Display transactions extracted
+                st.markdown("**Raw transactions extracted**")
+                st.markdown(transactions)
+                
+                # In case the output json uses 'transactions' as a key
+                if 'transactions' in transactions:
+                    transactions = transactions['transactions']
+ 
+                # Convert data to Pandas DataFrame
+                df = pd.DataFrame(transactions)
+
+                # Extract amounts and calculate total amount
+                amounts = df.iloc[:,2].tolist()
+                total_amt = round(sum(amounts), 2)
+                print(f"\n\n\n\n\n\n\n{amounts, total_amt}\n\n\n\n\n\n\n")
+
+                # Rename columns
+                df.columns = ['Date', 'Transaction Details', 'Amount (SGD)']
+
+                # Output to screen
+                st.markdown("+"*50)
+                st.markdown("**Transactions formatted in a table**")
+                st.write(df)
+                st.markdown(f"The total amount is: **${total_amt}**")
         finally:
             shutil.rmtree(temp_vectorstore_dir)  # Clean up the temporary directory
             
