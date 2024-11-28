@@ -11,10 +11,17 @@ from functions import *
 import pandas as pd
 import json
 
+
+## REMOVE WHEN RUNNING LOCALLY ##
 # Import latest sqlite for streamlit compatibility with chromadb
-# __import__('pysqlite3')
-# import sys
-# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+## --------------------------- ##
+
+
+# List of models available
+models_avail = ["gpt-4o-mini", "o1-mini"]
 
 # Create prompt template
 PROMPT_TEMPLATE = """
@@ -22,6 +29,10 @@ You are an assistant for question-answering tasks.
 You will be provided documents, specifically bank statements.
 You are expected to summarize and organize the transactions information based on the question that will be asked. Your primary goal will be to provide insights into the transactions in the bank statement. As such, it is absolutely crucial that you do not miss out any rows of transactions in the bank statement, and be extremely accurate. This means that you should not create additional transactions that do not exist.
 When asked to display or organize transactions, always organize it in ascending order by their date. 
+
+The fields of the transactions should be "date", "description", and "amount".
+Dates should always be formatted in the following way - dd MMM YYYY, for example "22 SEP 2024".
+Descriptions should always be formatted such that there are no spaces in the descriptions.
 
 THIS IS IMPORTANT, PLEASE ENFORCE THIS RULE!!! There are NO ERRORS OR DUPLICATES in the document, even if 2 transactions have the same description, date, and amount, they should BOTH be extracted. Extract ALL transactions related to the ones mentioned in the prompt from the bank statement, even if multiple transactions occurred on the same date. Make sure to return all of them even if some are identical or happen on the same day.
 
@@ -61,13 +72,17 @@ if "query_text" not in st.session_state:
 # Define available template questions
 template_options = [
     "----- Default: Leave blank -----",  # Blank option
-    "Can you extract and compile a list of all the transactions in this bank statement relating to <INSERT TRANSACTION NAME HERE>.",
+    "Can you extract all of the transactions from this bank statement that contain <INSERT TRANSACTION NAME HERE>."
 ]
 
 # Update session state when the user selects a template question
 def update_template():
     st.session_state.selected_template = st.session_state.template_selectbox
 
+# Read Me section
+st.markdown("<br>**:red-background[GUIDE]**", unsafe_allow_html=True)
+st.markdown("**:red[There is no 'best model' to use. Generally, gpt-4o-mini is more accurate, but if there are multiple records with the exact same date/description/amount, 4o tends to see those as duplicates and removes them. In this case o1-mini is better.]**")
+st.markdown("**:red[In some rare cases using both works better. This app is designed to combine the outputs of both models while removing overlapping records.]**")
 
 # Template question dropdown (outside the form to update session state)
 st.header('Ask a Question')
@@ -82,6 +97,15 @@ with st.form('myform'):
     # File upload (allow PDFs)
     st.header("Upload file")
     uploaded_file = st.file_uploader('Upload a PDF', type='pdf')
+
+    # Add a dropdown or radio button for model selection
+    options = ["gpt-4o-mini", "o1-mini", "Use all"]
+    model_option = st.selectbox(
+        "Choose LLM Model", 
+        options, 
+        index=0  # Set default index to the first option
+    )
+    
 
     # Handle clearing the text area when "Blank" is selected
     if selected_template == template_options[0]:
@@ -101,9 +125,16 @@ with st.form('myform'):
 
 
 if submitted and uploaded_file is not None:
+    llm_models = []
     with st.spinner('Processing...'):
-        llm = ChatOpenAI(model="gpt-4o-mini", api_key=OPENAI_API_KEY)
-        # llm = ChatOpenAI(model="o1-mini", api_key=OPENAI_API_KEY)
+        # If user selects to use all models
+        if model_option == options[-1]: # corresponds with "Use all"
+            for model in models_avail:
+                llm_models.append(ChatOpenAI(model=model, api_key=OPENAI_API_KEY))
+        # Else if user selects specific model to use
+        else: 
+            llm_models.append(ChatOpenAI(model=model_option, api_key=OPENAI_API_KEY))
+
 
         # Save the uploaded file to a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
@@ -133,49 +164,71 @@ if submitted and uploaded_file is not None:
                                              vectorstore_path=temp_vectorstore_dir)
 
             all_chunks = vectorstore._collection.get(include=["documents"])
-            documents = all_chunks['documents']  # This will give you all the stored documents (chunks)
+            documents = all_chunks['documents']  # Returns all the stored documents (chunks)
 
             # Concatenate context text
             context_text = "\n\n---\n\n".join([doc for doc in documents])
 
             # Create prompt
             prompt = prompt_template.format(context=context_text, question=query_text)
-            response = llm.invoke(prompt)
-            content = response.content
+            
+            # Get response from models selected and store them in contents list
+            contents = []
+            for model in llm_models:
+                response = model.invoke(prompt)
+                contents.append(response.content)
 
-            # Show result
-            if content:
-                # Clean output to convert to JSON
-                clean_content = content.replace("\n", "").replace("\\", "").strip()
-                clean_content = content.strip("```json").strip("```").strip()
+            # Initialise lists to store output dataframes and transactions extracted from each LLM
+            dfs = []
+            transactions_lists = []
+            
+            # If response not empty
+            if contents[0]:
+                # Loop through each response content
+                for i, content in enumerate(contents):
+                    # Clean output to convert to JSON
+                    clean_content = content.replace("\n", "").replace("\\", "").strip()
+                    clean_content = content.strip("```json").strip("```").strip()
 
-                # Convert output to JSON
-                transactions = json.loads(clean_content)
-                
-                # Display transactions extracted
-                st.markdown("**Raw transactions extracted**")
-                st.markdown(transactions)
-                
-                # In case the output json uses 'transactions' as a key
-                if 'transactions' in transactions:
-                    transactions = transactions['transactions']
- 
-                # Convert data to Pandas DataFrame
-                df = pd.DataFrame(transactions)
+                    # Convert output to JSON
+                    transactions = json.loads(clean_content)
+                    transactions_lists.append(transactions)
+                    
+                    # In case the output json uses 'transactions' as a key
+                    if 'transactions' in transactions:
+                        transactions = transactions['transactions']
+    
+                    # Convert data to Pandas DataFrame
+                    df = pd.DataFrame(transactions)
+                    dfs.append(df)
+
+                # Merge all DataFrames in the list if applicable
+                merged_df = dfs[0]
+                if len(dfs) > 1:
+                    for df in dfs[1:]:
+                        merged_df = pd.merge(merged_df, df, on=['date', 'description', 'amount'], how='outer', suffixes=('_A', '_B'))
 
                 # Extract amounts and calculate total amount
-                amounts = df.iloc[:,2].tolist()
+                amounts = merged_df.iloc[:,2].tolist()
                 total_amt = round(sum(amounts), 2)
-                print(f"\n\n\n\n\n\n\n{amounts, total_amt}\n\n\n\n\n\n\n")
 
                 # Rename columns
-                df.columns = ['Date', 'Transaction Details', 'Amount (SGD)']
+                merged_df.columns = ['Date', 'Transaction Details', 'Amount (SGD)']
 
-                # Output to screen
-                st.markdown("+"*50)
-                st.markdown("**Transactions formatted in a table**")
-                st.write(df)
-                st.markdown(f"The total amount is: **${total_amt}**")
+                # Output final table to screen
+                st.markdown("**:blue-background[Here are the list of transactions requested]**")
+                st.write(merged_df)
+                st.markdown(f"The total amount is: :red[**${total_amt}**]  ")
+
+
+                # Display additional information about the prompts output for each transaction
+                st.markdown("<br><br><br>", unsafe_allow_html=True)
+                st.markdown("**:blue-background[Additional information regarding prompt output]**")
+                for i, transaction in enumerate(transactions_lists):
+                    st.markdown("+"*50)
+                    st.markdown(f"**Raw transactions extracted: *attempt <{i+1}>* **")
+                    st.markdown(transaction)
+
         finally:
             shutil.rmtree(temp_vectorstore_dir)  # Clean up the temporary directory
             
